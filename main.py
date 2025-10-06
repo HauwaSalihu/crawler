@@ -11,9 +11,11 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 # Setup connections
 try:
     mongo_uri = os.getenv("MONGO_URI")
-    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis_url = os.getenv("REDIS_URL")
+    if not redis_url:
+        raise SystemExit("❌ REDIS_URL not set in environment!")
 
-    r = redis.from_url(redis_url, decode_responses=True)
+    r = redis.from_url(redis_url, decode_responses=True, ssl=redis_url.startswith("rediss://"))
     mongo = MongoClient(mongo_uri)
     db = mongo["crawler"]
     searches = db["searches"]

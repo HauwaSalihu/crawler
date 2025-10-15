@@ -7,10 +7,11 @@ import json
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from linkedin_fallback import search_linkedin_company
-import urllib3  # 👇 ADDED
+import urllib3
 
 # 👇 Disable SSL warnings globally (since verify=False)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 PHONE_REGEX = re.compile(
     r"(?:\+31\s?(?:\(0\))?\s?\d{1,2}[\s\-]?\d{6,7}|0\d{9})"
 )
@@ -23,9 +24,12 @@ EXCLUDED_PATHS = [
 EXCLUDED_DOMAINS = ["nltimes.nl"]
 EXCLUDED_EXTENSIONS = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx")
 
+# 🔁 Index tracker for sequential API/CSE rotation
+_api_index = 0
+
 
 def clean_dutch_phone(ph: str):
-    cleaned = re.sub(r"[^\d+]", "", ph)  # keep only digits and +
+    cleaned = re.sub(r"[^\d+]", "", ph)
     if cleaned.startswith("+31") and 11 <= len(cleaned) <= 12:
         return cleaned
     if cleaned.startswith("0") and len(cleaned) == 10:
@@ -34,105 +38,74 @@ def clean_dutch_phone(ph: str):
 
 
 def clean_company_name(title: str) -> str:
-    """
-    Clean company names from page titles by removing marketing suffixes/prefixes.
-    """
     if not title:
         return None
-
-    # Remove common separators and trailing/leading marketing text
     parts = re.split(r"\s[-|–:]\s", title)
-    if len(parts) > 1:
-        # Heuristic: last part is most likely the real name
-        candidate = parts[-1]
-    else:
-        candidate = parts[0]
-
-    return candidate.strip()
+    return (parts[-1] if len(parts) > 1 else parts[0]).strip()
 
 
 def safe_fetch(url, retries=3, delay=2):
     for attempt in range(retries):
         try:
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                     "Chrome/120.0.0.0 Safari/537.36"}
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/120.0.0.0 Safari/537.36"
+            }
             res = requests.get(url, headers=headers, timeout=10, verify=False)
-            # res = requests.get(url, headers=headers, timeout=10)
             if res.status_code == 200:
                 return res.text
             else:
                 print(f"⚠️ {url} returned status {res.status_code}")
         except RequestException as e:
-            print(f"⚠️ Error fetching {url}: {e} (attempt {attempt+1}/{retries})")
+            print(f"⚠️ Error fetching {url}: {e} (attempt {attempt + 1}/{retries})")
             time.sleep(delay)
     print(f"⏭️ Skipping {url} after {retries} failed attempts")
     return None
-import random
 
-def get_api_credentials():
-    """Rotate through multiple Google API keys and CSE IDs."""
+
+def get_api_credentials(fallback=False):
+    """
+    Sequentially rotate through Google API keys and CSE IDs.
+    If fallback=True, move to the next available key pair.
+    """
+    global _api_index
     api_keys = os.getenv("GOOGLE_API_KEYS", "").split(",")
     cse_ids = os.getenv("GOOGLE_CSE_IDS", "").split(",")
 
-    # Strip spaces just in case
     api_keys = [k.strip() for k in api_keys if k.strip()]
     cse_ids = [c.strip() for c in cse_ids if c.strip()]
 
     if not api_keys or not cse_ids:
         raise ValueError("⚠️ Missing GOOGLE_API_KEYS or GOOGLE_CSE_IDS in .env")
 
-    # Randomly select one key/id pair
-    api_key = random.choice(api_keys)
-    cse_id = random.choice(cse_ids)
+    limit = min(len(api_keys), len(cse_ids))
+
+    if fallback:
+        _api_index = (_api_index + 1) % limit
+
+    api_key = api_keys[_api_index % limit]
+    cse_id = cse_ids[_api_index % limit]
+
+    print(f"🔁 Using API key #{_api_index % limit + 1}: {api_key[:12]}... / CSE ID: {cse_id}")
     return api_key, cse_id
 
+
 def crawl_companies(industry, region, staff_size=None, limit=50):
+    global _api_index
     api_key, cse_id = get_api_credentials()
 
-    if not api_key or not cse_id:
-        raise ValueError("⚠️ Missing GOOGLE_API_KEY or GOOGLE_CSE_ID in .env")
-
     variations = [
-        # 🇳🇱 Dutch (primary)
         "dakdekkers bedrijf Nederland",
         "dakbedekking aannemers Nederland",
         "dak installatie bedrijven Nederland",
         "dakdekkers Amsterdam",
         "dakdekkers Rotterdam",
         "dakdekkers Utrecht",
-        "dakdekkers Groningen",
-        "dakdekkers Eindhoven",
-
-        # 🇬🇧 English (targeting Dutch companies)
-        "roofing contractors Netherlands",
         "roofing companies Netherlands",
-        "roof installation companies Netherlands",
-        "roof repair services Netherlands",
-        "roofers Amsterdam Netherlands",
-        "roofers Rotterdam Netherlands",
-        "roofers Utrecht Netherlands",
-        "roofers Groningen Netherlands",
-        "roofers Eindhoven Netherlands",
-
-        # 🌍 Domain-focused searches (.nl bias)
+        "roofers Netherlands",
         "roofing contractors site:.nl",
         "dakdekkers bedrijf site:.nl",
-        "dakbedekking aannemers site:.nl",
-        "dak installatie bedrijven site:.nl",
-        "roof installation companies site:.nl",
-
-        # 🧠 Broader commercial/industry terms
-        "dak onderhoud bedrijven Nederland",
-        "dakisolatie bedrijven Nederland",
-        "dakreparatie bedrijven Nederland",
-        "roof maintenance companies Netherlands",
-        "roof insulation contractors Netherlands",
-
-        # 💼 Directories & listings
-        "roofing company directory Netherlands",
-        "dakdekkers gids Nederland",
-        "bouwbedrijven Nederland dakbedekking",
     ]
 
     companies = []
@@ -147,14 +120,24 @@ def crawl_companies(industry, region, staff_size=None, limit=50):
                 "cx": cse_id,
                 "key": api_key,
                 "num": per_page,
-                "start": start
+                "start": start,
+                "gl": "nl",
+                "hl": "nl"
             }
             try:
                 res = requests.get("https://www.googleapis.com/customsearch/v1",
                                    params=params, timeout=10)
                 data = res.json()
+
+                # Handle API quota or error cases
+                if res.status_code in [403, 429] or "error" in data:
+                    print(f"⚠️ API key {_api_index + 1} failed — switching to next key...")
+                    api_key, cse_id = get_api_credentials(fallback=True)
+                    continue
+
             except RequestException as e:
                 print(f"❌ Google CSE request failed for query '{query}': {e}")
+                api_key, cse_id = get_api_credentials(fallback=True)
                 continue
 
             if not data.get("items"):
@@ -165,7 +148,6 @@ def crawl_companies(industry, region, staff_size=None, limit=50):
                 domain = urlparse(link).netloc.lower()
                 path = urlparse(link).path.lower()
 
-                # Skip excluded domains, extensions, and paths
                 if (
                     any(ext for ext in EXCLUDED_EXTENSIONS if link.endswith(ext))
                     or any(p in path for p in EXCLUDED_PATHS)
@@ -183,6 +165,7 @@ def crawl_companies(industry, region, staff_size=None, limit=50):
 
             if len(companies) >= limit:
                 return companies
+
         time.sleep(0.5)
 
     return companies
@@ -217,15 +200,12 @@ def enrich_company(url, region="Netherlands"):
             "raw": "Skipped publication/file page"
         }
 
-    # ---------- Extract emails ----------
     email_pattern = r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.(?!png|jpg|jpeg|gif|bmp|svg|webp)[A-Za-z]{2,}"
     emails = list(set(re.findall(email_pattern, html)))[:5]
 
-    # ---------- Extract phones ----------
     raw_phones = PHONE_REGEX.findall(html)
     phones = list({p for p in (clean_dutch_phone(ph) for ph in raw_phones) if p})
 
-    # ---------- Extract company name + address ----------
     company_name, address = None, None
     for script in soup.find_all("script", {"type": "application/ld+json"}):
         try:

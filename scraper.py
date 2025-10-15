@@ -68,11 +68,27 @@ def safe_fetch(url, retries=3, delay=2):
             time.sleep(delay)
     print(f"⏭️ Skipping {url} after {retries} failed attempts")
     return None
+import random
 
+def get_api_credentials():
+    """Rotate through multiple Google API keys and CSE IDs."""
+    api_keys = os.getenv("GOOGLE_API_KEYS", "").split(",")
+    cse_ids = os.getenv("GOOGLE_CSE_IDS", "").split(",")
+
+    # Strip spaces just in case
+    api_keys = [k.strip() for k in api_keys if k.strip()]
+    cse_ids = [c.strip() for c in cse_ids if c.strip()]
+
+    if not api_keys or not cse_ids:
+        raise ValueError("⚠️ Missing GOOGLE_API_KEYS or GOOGLE_CSE_IDS in .env")
+
+    # Randomly select one key/id pair
+    api_key = random.choice(api_keys)
+    cse_id = random.choice(cse_ids)
+    return api_key, cse_id
 
 def crawl_companies(industry, region, staff_size=None, limit=50):
-    api_key = os.getenv("GOOGLE_API_KEY")
-    cse_id = os.getenv("GOOGLE_CSE_ID")
+    api_key, cse_id = get_api_credentials()
 
     if not api_key or not cse_id:
         raise ValueError("⚠️ Missing GOOGLE_API_KEY or GOOGLE_CSE_ID in .env")

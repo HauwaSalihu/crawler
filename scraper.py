@@ -7,7 +7,10 @@ import json
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from linkedin_fallback import search_linkedin_company
+import urllib3  # 👇 ADDED
 
+# 👇 Disable SSL warnings globally (since verify=False)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 PHONE_REGEX = re.compile(
     r"(?:\+31\s?(?:\(0\))?\s?\d{1,2}[\s\-]?\d{6,7}|0\d{9})"
 )
@@ -54,7 +57,8 @@ def safe_fetch(url, retries=3, delay=2):
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                                      "AppleWebKit/537.36 (KHTML, like Gecko) "
                                      "Chrome/120.0.0.0 Safari/537.36"}
-            res = requests.get(url, headers=headers, timeout=10)
+            res = requests.get(url, headers=headers, timeout=10, verify=False)
+            # res = requests.get(url, headers=headers, timeout=10)
             if res.status_code == 200:
                 return res.text
             else:
@@ -66,7 +70,7 @@ def safe_fetch(url, retries=3, delay=2):
     return None
 
 
-def crawl_companies(industry, region, staff_size=None, limit=180):
+def crawl_companies(industry, region, staff_size=None, limit=50):
     api_key = os.getenv("GOOGLE_API_KEY")
     cse_id = os.getenv("GOOGLE_CSE_ID")
 

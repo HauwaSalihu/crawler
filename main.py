@@ -46,7 +46,7 @@ while True:
         pass  # keep as string if not ObjectId
 
     # 1️⃣ Crawl raw companies
-    companies = crawl_companies(data["industry"], data["region"], limit=180)
+    companies = crawl_companies(data["industry"], data["region"], limit=50)
     print(f"🔎 Found {len(companies)} raw companies")
 
     searches.update_one(
